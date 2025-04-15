@@ -1,0 +1,10 @@
+# Terraform関連の機密ファイル
+*.tfstate
+*.tfstate.backup
+.terraform/
+.terraform.lock.hcl
+*.tfvars
+
+# 環境変数ファイル
+.env
+*.pem # 秘密鍵ファイル（EC2のSSHキーなど）
