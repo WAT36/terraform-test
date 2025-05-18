@@ -8,3 +8,5 @@
 # 環境変数ファイル
 .env
 *.pem # 秘密鍵ファイル（EC2のSSHキーなど）
+
+node_modules
