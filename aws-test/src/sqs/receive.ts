@@ -5,7 +5,7 @@ import {
 } from "@aws-sdk/client-sqs";
 import * as dotenv from "dotenv";
 
-dotenv.config();
+dotenv.config({ path: "../../.env" });
 
 const REGION = process.env.REGION;
 const QUEUE_URL = process.env.QUEUE_URL;
