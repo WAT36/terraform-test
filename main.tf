@@ -1,5 +1,13 @@
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
 provider "aws" {
-  region = "ap-northeast-1"  # 利用したいAWSリージョン
+  region = var.region  # 利用したいAWSリージョン
 }
 
 # ------------------------------
@@ -13,62 +21,210 @@ resource "aws_sqs_queue" "example_queue" {
   receive_wait_time_seconds = 10
 }
 
-# ------------------------------
-# AppSync(GraphQL実験用)
-# URL:aws_appsync_graphql_api.this.uris["GRAPHQL"]
-# key:aws_appsync_api_key.this.key
-# ------------------------------
-resource "aws_appsync_graphql_api" "this" {
-  name                 = "sample-appsync"
-  authentication_type  = "API_KEY"
 
-  # スキーマを直接埋め込み
-  schema = <<EOF
-type Query {
-  hello(name: String): String
-}
-EOF
-}
+# DynamoDB テーブル（ユーザー用）
+resource "aws_dynamodb_table" "users" {
+  name           = "${var.project_name}-users"
+  billing_mode   = "PAY_PER_REQUEST"
+  hash_key       = "id"
 
-# API_KEY 認証の有効化
-resource "aws_appsync_api_key" "this" {
-  api_id  = aws_appsync_graphql_api.this.id
-  # expires を省略するとデフォルト 7 日後に失効します
+  attribute {
+    name = "id"
+    type = "S"
+  }
+
+  tags = {
+    Name = "${var.project_name}-users"
+  }
 }
 
-# NONE データソース（擬似レスポンス用）
-resource "aws_appsync_datasource" "none" {
-  api_id     = aws_appsync_graphql_api.this.id
-  name       = "NoneDataSource"
-  type       = "NONE"
+# DynamoDB テーブル（投稿用）
+resource "aws_dynamodb_table" "posts" {
+  name           = "${var.project_name}-posts"
+  billing_mode   = "PAY_PER_REQUEST"
+  hash_key       = "id"
+
+  attribute {
+    name = "id"
+    type = "S"
+  }
+
+  attribute {
+    name = "authorId"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name               = "AuthorIndex"
+    hash_key           = "authorId"
+    projection_type    = "ALL"
+  }
+
+  tags = {
+    Name = "${var.project_name}-posts"
+  }
 }
 
-# Resolver 定義：hello フィールド
-resource "aws_appsync_resolver" "hello" {
-  api_id      = aws_appsync_graphql_api.this.id
+# AppSync GraphQL API
+resource "aws_appsync_graphql_api" "main" {
+  name                = "${var.project_name}-api"
+  authentication_type = "API_KEY"
+  schema              = file("${path.module}/config/graphql/schema.graphql")
+
+  tags = {
+    Name = "${var.project_name}-api"
+  }
+}
+
+# API Key
+resource "aws_appsync_api_key" "main" {
+  api_id  = aws_appsync_graphql_api.main.id
+  expires = timeadd(timestamp(), "8760h")
+}
+
+# IAM Role for AppSync
+resource "aws_iam_role" "appsync" {
+  name = "${var.project_name}-appsync-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "appsync.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "appsync" {
+  name = "${var.project_name}-appsync-policy"
+  role = aws_iam_role.appsync.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:DeleteItem",
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:Query",
+          "dynamodb:Scan",
+          "dynamodb:UpdateItem"
+        ]
+        Resource = [
+          aws_dynamodb_table.users.arn,
+          aws_dynamodb_table.posts.arn,
+          "${aws_dynamodb_table.posts.arn}/index/*"
+        ]
+      }
+    ]
+  })
+}
+
+# Data Sources
+resource "aws_appsync_datasource" "users" {
+  api_id           = aws_appsync_graphql_api.main.id
+  name             = "UsersTable"
+  service_role_arn = aws_iam_role.appsync.arn
+  type             = "AMAZON_DYNAMODB"
+
+  dynamodb_config {
+    table_name = aws_dynamodb_table.users.name
+  }
+}
+
+resource "aws_appsync_datasource" "posts" {
+  api_id           = aws_appsync_graphql_api.main.id
+  name             = "PostsTable"
+  service_role_arn = aws_iam_role.appsync.arn
+  type             = "AMAZON_DYNAMODB"
+
+  dynamodb_config {
+    table_name = aws_dynamodb_table.posts.name
+  }
+}
+
+# Resolvers
+resource "aws_appsync_resolver" "get_user" {
+  api_id      = aws_appsync_graphql_api.main.id
+  field       = "getUser"
   type        = "Query"
-  field       = "hello"
-  data_source = aws_appsync_datasource.none.name
+  data_source = aws_appsync_datasource.users.name
 
-  # リクエストテンプレートは空のペイロードを返す
-  request_template = <<EOF
-{
-  "version": "2017-02-28",
-  "payload": {}
+  request_template = jsonencode({
+    version = "2018-05-29"
+    operation = "GetItem"
+    key = {
+      id = { S = "$ctx.args.id" }
+    }
+  })
+
+  response_template = "#if($ctx.error)$util.error($ctx.error.message, $ctx.error.type)#end$util.toJson($ctx.result)"
 }
-EOF
 
-  # レスポンステンプレートで引数を読み取り、文字列として返却
-  response_template = <<EOF
-#if($ctx.error)
-  $util.error($ctx.error.message, $ctx.error.type)
-#end
+resource "aws_appsync_resolver" "list_users" {
+  api_id      = aws_appsync_graphql_api.main.id
+  field       = "listUsers"
+  type        = "Query"
+  data_source = aws_appsync_datasource.users.name
 
-#set($name = $ctx.arguments.name)
-#if(!$name)
-  #set($name = "World")
-#end
+  request_template = jsonencode({
+    version = "2018-05-29"
+    operation = "Scan"
+  })
 
-$util.toJson("Hello, $name!")
-EOF
+  response_template = "#if($ctx.error)$util.error($ctx.error.message, $ctx.error.type)#end$util.toJson($ctx.result.items)"
 }
+
+resource "aws_appsync_resolver" "create_user" {
+  api_id      = aws_appsync_graphql_api.main.id
+  field       = "createUser"
+  type        = "Mutation"
+  data_source = aws_appsync_datasource.users.name
+
+  request_template = jsonencode({
+    version = "2018-05-29"
+    operation = "PutItem"
+    key = {
+      id = { S = "$util.autoId()" }
+    }
+    attributeValues = {
+      name = { S = "$ctx.args.input.name" }
+      email = { S = "$ctx.args.input.email" }
+      createdAt = { S = "$util.time.nowISO8601()" }
+    }
+  })
+
+  response_template = "#if($ctx.error)$util.error($ctx.error.message, $ctx.error.type)#end$util.toJson($ctx.result)"
+}
+
+resource "aws_appsync_resolver" "create_post" {
+  api_id      = aws_appsync_graphql_api.main.id
+  field       = "createPost"
+  type        = "Mutation"
+  data_source = aws_appsync_datasource.posts.name
+
+  request_template = jsonencode({
+    version = "2018-05-29"
+    operation = "PutItem"
+    key = {
+      id = { S = "$util.autoId()" }
+    }
+    attributeValues = {
+      title = { S = "$ctx.args.input.title" }
+      content = { S = "$ctx.args.input.content" }
+      authorId = { S = "$ctx.args.input.authorId" }
+      createdAt = { S = "$util.time.nowISO8601()" }
+    }
+  })
+
+  response_template = "#if($ctx.error)$util.error($ctx.error.message, $ctx.error.type)#end$util.toJson($ctx.result)"
+}
+
+

@@ -1,0 +1,53 @@
+type User {
+  id: ID!
+  name: String!
+  email: String!
+  createdAt: String!
+  posts: [Post]
+}
+
+type Post {
+  id: ID!
+  title: String!
+  content: String!
+  authorId: ID!
+  createdAt: String!
+  author: User
+}
+
+type Query {
+  getUser(id: ID!): User
+  listUsers: [User]
+  getPost(id: ID!): Post
+  listPosts: [Post]
+  getPostsByUser(userId: ID!): [Post]
+}
+
+type Mutation {
+  createUser(input: CreateUserInput!): User
+  createPost(input: CreatePostInput!): Post
+  updateUser(input: UpdateUserInput!): User
+  deleteUser(id: ID!): User
+}
+
+input CreateUserInput {
+  name: String!
+  email: String!
+}
+
+input CreatePostInput {
+  title: String!
+  content: String!
+  authorId: ID!
+}
+
+input UpdateUserInput {
+  id: ID!
+  name: String
+  email: String
+}
+
+schema {
+  query: Query
+  mutation: Mutation
+}
