@@ -182,6 +182,58 @@ resource "aws_appsync_resolver" "list_users" {
   response_template = "#if($ctx.error)$util.error($ctx.error.message, $ctx.error.type)#end$util.toJson($ctx.result.items)"
 }
 
+resource "aws_appsync_resolver" "get_post" {
+  api_id      = aws_appsync_graphql_api.main.id
+  field       = "getPost"
+  type        = "Query"
+  data_source = aws_appsync_datasource.posts.name
+
+  request_template = jsonencode({
+    version = "2018-05-29"
+    operation = "GetItem"
+    key = {
+      id = { S = "$ctx.args.id" }
+    }
+  })
+
+  response_template = "#if($ctx.error)$util.error($ctx.error.message, $ctx.error.type)#end$util.toJson($ctx.result)"
+}
+
+resource "aws_appsync_resolver" "list_posts" {
+  api_id      = aws_appsync_graphql_api.main.id
+  field       = "listPosts"
+  type        = "Query"
+  data_source = aws_appsync_datasource.posts.name
+
+  request_template = jsonencode({
+    version = "2018-05-29"
+    operation = "Scan"
+  })
+
+  response_template = "#if($ctx.error)$util.error($ctx.error.message, $ctx.error.type)#end$util.toJson($ctx.result.items)"
+}
+
+resource "aws_appsync_resolver" "get_posts_by_user" {
+  api_id      = aws_appsync_graphql_api.main.id
+  field       = "getPostsByUser"
+  type        = "Query"
+  data_source = aws_appsync_datasource.posts.name
+
+  request_template = jsonencode({
+    version = "2018-05-29"
+    operation = "Query"
+    index = "AuthorIndex"
+    query = {
+      expression = "authorId = :authorId"
+      expressionValues = {
+        ":authorId" = { S = "$ctx.args.userId" }
+      }
+    }
+  })
+
+  response_template = "#if($ctx.error)$util.error($ctx.error.message, $ctx.error.type)#end$util.toJson($ctx.result.items)"
+}
+
 resource "aws_appsync_resolver" "create_user" {
   api_id      = aws_appsync_graphql_api.main.id
   field       = "createUser"
@@ -198,6 +250,52 @@ resource "aws_appsync_resolver" "create_user" {
       name = { S = "$ctx.args.input.name" }
       email = { S = "$ctx.args.input.email" }
       createdAt = { S = "$util.time.nowISO8601()" }
+    }
+  })
+
+  response_template = "#if($ctx.error)$util.error($ctx.error.message, $ctx.error.type)#end$util.toJson($ctx.result)"
+}
+
+
+resource "aws_appsync_resolver" "update_user" {
+  api_id      = aws_appsync_graphql_api.main.id
+  field       = "updateUser"
+  type        = "Mutation"
+  data_source = aws_appsync_datasource.users.name
+
+  request_template = jsonencode({
+    version = "2018-05-29"
+    operation = "UpdateItem"
+    key = {
+      id = { S = "$ctx.args.input.id" }
+    }
+    update = {
+      expression = "SET #name = :name, #email = :email"
+      expressionNames = {
+        "#name" = "name"
+        "#email" = "email"
+      }
+      expressionValues = {
+        ":name" = { S = "$util.defaultIfNull($ctx.args.input.name, $ctx.source.name)" }
+        ":email" = { S = "$util.defaultIfNull($ctx.args.input.email, $ctx.source.email)" }
+      }
+    }
+  })
+
+  response_template = "#if($ctx.error)$util.error($ctx.error.message, $ctx.error.type)#end$util.toJson($ctx.result)"
+}
+
+resource "aws_appsync_resolver" "delete_user" {
+  api_id      = aws_appsync_graphql_api.main.id
+  field       = "deleteUser"
+  type        = "Mutation"
+  data_source = aws_appsync_datasource.users.name
+
+  request_template = jsonencode({
+    version = "2018-05-29"
+    operation = "DeleteItem"
+    key = {
+      id = { S = "$ctx.args.id" }
     }
   })
 
