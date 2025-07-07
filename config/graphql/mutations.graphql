@@ -1,0 +1,20 @@
+# ユーザー作成
+mutation CreateUser($input: CreateUserInput!) {
+  createUser(input: $input) {
+    id
+    name
+    email
+    createdAt
+  }
+}
+
+# 投稿作成
+mutation CreatePost($input: CreatePostInput!) {
+  createPost(input: $input) {
+    id
+    title
+    content
+    authorId
+    createdAt
+  }
+}

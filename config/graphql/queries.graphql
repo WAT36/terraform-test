@@ -1,0 +1,30 @@
+# ユーザー一覧取得
+query ListUsers {
+  listUsers {
+    id
+    name
+    email
+    createdAt
+  }
+}
+
+# 特定ユーザー取得
+query GetUser($id: ID!) {
+  getUser(id: $id) {
+    id
+    name
+    email
+    createdAt
+  }
+}
+
+# 投稿一覧取得
+query ListPosts {
+  listPosts {
+    id
+    title
+    content
+    authorId
+    createdAt
+  }
+}
